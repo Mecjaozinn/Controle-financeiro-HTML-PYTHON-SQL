@@ -1,0 +1,244 @@
+# ============================================================
+# IMPORTAÇÕES — ferramentas que o Python pega "emprestado"
+# pra fazer tudo funcionar
+# ============================================================
+
+from flask import Flask, request, render_template, redirect, flash
+# Flask          → cria o servidor web (o "motor" do site)
+# request        → lê o que o usuário digitou no formulário
+# render_template → abre o arquivo HTML e manda pro navegador
+# redirect       → manda o usuário pra outra página
+# flash          → guarda mensagens temporárias ("Gasto adicionado!", "Erro!")
+
+import sqlite3
+# sqlite3 → banco de dados simples que salva tudo num arquivo .db
+# não precisa instalar nada, já vem com o Python!
+
+from datetime import datetime
+# datetime → pega a data e hora atual do computador
+
+# ============================================================
+# CONFIGURAÇÕES INICIAIS DO APP
+# ============================================================
+
+app = Flask(__name__)
+# Cria a aplicação Flask. O __name__ diz ao Flask onde estão os arquivos do projeto.
+
+app.secret_key = "chave-secreta-123"
+# Senha interna obrigatória pro flash funcionar.
+# Pode ser qualquer texto, só não deixa vazia!
+
+# ============================================================
+# CONEXÃO COM O BANCO DE DADOS
+# ============================================================
+
+def conectar():
+    # Toda vez que precisar falar com o banco, chama essa função.
+    con = sqlite3.connect("financas.db")
+    # Abre (ou cria, se não existir) o arquivo financas.db
+
+    con.row_factory = sqlite3.Row
+    # Faz os dados retornarem com NOME em vez de posição.
+    # Sem isso: g[3] → com isso: g["valor"] — muito mais legível!
+
+    return con
+
+# ============================================================
+# CRIAÇÃO DAS TABELAS (roda só uma vez quando o programa inicia)
+# ============================================================
+
+with conectar() as con:
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS gastos (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            data  TEXT    NOT NULL,
+            nome  TEXT    NOT NULL,
+            valor REAL    NOT NULL
+        )
+    """)
+    # IF NOT EXISTS → se a tabela já existe, não apaga, não faz nada.
+    # AUTOINCREMENT → o id é gerado automaticamente (1, 2, 3...)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS renda (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            data           TEXT    NOT NULL,
+            tipo           TEXT    NOT NULL,
+            bruto          REAL    NOT NULL,
+            liquido        REAL    NOT NULL,
+            desconto_nome  TEXT    NOT NULL DEFAULT '',
+            desconto_valor REAL    NOT NULL DEFAULT 0
+        )
+    """)
+    # desconto_nome  → nome do desconto que o usuário deu (ex: "Vale Transporte")
+    # desconto_valor → percentual em decimal (ex: 0.06 = 6%)
+    # DEFAULT ''/ 0  → se não tiver desconto, fica vazio/zero automaticamente
+
+
+# ============================================================
+# ROTA: PÁGINA INICIAL — exibe tudo
+# ============================================================
+
+@app.route("/")
+def index():
+    # @app.route("/") → quando o usuário acessa http://127.0.0.1:5000
+    # essa função é chamada automaticamente
+
+    with conectar() as con:
+        gastos = con.execute("SELECT * FROM gastos ORDER BY id DESC").fetchall()
+        renda  = con.execute("SELECT * FROM renda ORDER BY id DESC").fetchall()
+        # ORDER BY id DESC → do mais recente pro mais antigo
+        # fetchall() → pega TODOS os resultados de uma vez
+
+    total_gastos = sum(g["valor"]   for g in gastos)
+    total_renda  = sum(r["liquido"] for r in renda)
+    # Percorre cada linha e soma os valores
+
+    restante = total_renda - total_gastos
+    # Quanto sobrou no final do mês
+
+    return render_template("index.html",
+                           gastos=gastos,
+                           renda=renda,
+                           total_gastos=total_gastos,
+                           total_renda=total_renda,
+                           restante=restante)
+    # Manda todos os dados pro HTML exibir na tela
+
+
+# ============================================================
+# ROTA: ADICIONAR RENDA
+# ============================================================
+
+@app.route("/renda", methods=["POST"])
+def adicionar_renda():
+    # methods=["POST"] → só aceita envio de formulário,
+    # não deixa acessar direto pela URL
+
+    tipo          = request.form.get("tipo", "").strip()
+    valor_str     = request.form.get("valor", "").strip()
+    tem_desconto  = request.form.get("tem_desconto")
+    # tem_desconto → vem do checkbox do HTML. Se marcado, vale "on". Se não, vem None.
+
+    desconto_nome  = ""
+    desconto_valor = 0.0
+
+    # Valida se o tipo foi preenchido
+    if not tipo:
+        flash("Informe o tipo da renda.", "erro")
+        return redirect("/")
+
+    # Valida e converte o valor bruto
+    try:
+        bruto = float(valor_str.replace(",", "."))
+        # .replace(",", ".") → aceita tanto 1,50 quanto 1.50
+        if bruto <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Valor inválido.", "erro")
+        return redirect("/")
+
+    # Se o usuário marcou que tem desconto, pega nome e percentual
+    if tem_desconto:
+        desconto_nome = request.form.get("desconto_nome", "").strip()
+        desconto_str  = request.form.get("desconto_percentual", "0").strip()
+
+        if not desconto_nome:
+            flash("Informe o nome do desconto.", "erro")
+            return redirect("/")
+
+        try:
+            desconto_valor = float(desconto_str.replace(",", ".")) / 100
+            # Divide por 100 pra transformar porcentagem em decimal
+            # Ex: usuário digita "6" → vira 0.06
+            if desconto_valor < 0 or desconto_valor >= 1:
+                raise ValueError
+        except ValueError:
+            flash("Percentual de desconto inválido.", "erro")
+            return redirect("/")
+
+    # Calcula o líquido aplicando o desconto (se houver)
+    liquido = bruto * (1 - desconto_valor)
+
+    data = datetime.now().strftime("%d/%m/%Y")
+    # Pega a data de hoje no formato 20/05/2026
+
+    with conectar() as con:
+        con.execute(
+            "INSERT INTO renda (data, tipo, bruto, liquido, desconto_nome, desconto_valor) VALUES (?, ?, ?, ?, ?, ?)",
+            (data, tipo, bruto, liquido, desconto_nome, desconto_valor)
+        )
+    # Os ? são substitutos seguros pros valores — evitam ataques ao banco (SQL injection)
+
+    flash("Renda adicionada!", "ok")
+    return redirect("/")
+
+
+# ============================================================
+# ROTA: ADICIONAR GASTO
+# ============================================================
+
+@app.route("/gasto", methods=["POST"])
+def adicionar_gasto():
+
+    nome      = request.form.get("nome", "").strip()
+    valor_str = request.form.get("valor", "").strip()
+
+    # Valida se o nome foi preenchido
+    if not nome:
+        flash("Informe o nome do gasto.", "erro")
+        return redirect("/")
+
+    # Valida e converte o valor
+    try:
+        valor = float(valor_str.replace(",", "."))
+        if valor <= 0:
+            raise ValueError
+    except ValueError:
+        flash("Valor inválido.", "erro")
+        return redirect("/")
+
+    data = datetime.now().strftime("%d/%m/%Y")
+
+    with conectar() as con:
+        con.execute(
+            "INSERT INTO gastos (data, nome, valor) VALUES (?, ?, ?)",
+            (data, nome, valor)
+        )
+
+    flash("Gasto adicionado!", "ok")
+    return redirect("/")
+
+
+# ============================================================
+# ROTAS: EXCLUIR REGISTROS
+# ============================================================
+
+@app.route("/renda/<int:renda_id>/excluir", methods=["POST"])
+def excluir_renda(renda_id):
+    # <int:renda_id> → captura o número da URL
+    # Ex: /renda/3/excluir → passa o número 3 pra função
+    with conectar() as con:
+        con.execute("DELETE FROM renda WHERE id = ?", (renda_id,))
+    flash("Renda removida.", "ok")
+    return redirect("/")
+
+
+@app.route("/gasto/<int:gasto_id>/excluir", methods=["POST"])
+def excluir_gasto(gasto_id):
+    with conectar() as con:
+        con.execute("DELETE FROM gastos WHERE id = ?", (gasto_id,))
+    flash("Gasto removido.", "ok")
+    return redirect("/")
+
+
+# ============================================================
+# INICIALIZAÇÃO DO SERVIDOR
+# ============================================================
+
+if __name__ == "__main__":
+    # Só sobe o servidor quando você roda o arquivo diretamente.
+    # Se outro arquivo importar esse, o servidor NÃO sobe sozinho.
+    app.run(debug=True)
+    # debug=True → reinicia automaticamente ao salvar o código
+    #              e mostra erros detalhados no navegador
