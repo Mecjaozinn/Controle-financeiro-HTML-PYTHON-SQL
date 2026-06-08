@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Finanças Pessoais</title>
+
+  <!-- Google Fonts: Syne pra títulos, DM Mono pra números -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ── Variáveis de cor — troca aqui pra mudar o tema inteiro ── */
+    :root {
+      --bg:      #0e0f11;
+      --surface: #16181c;
+      --border:  #2a2d35;
+      --text:    #e8eaf0;
+      --muted:   #6b7280;
+      --green:   #22d3a0;
+      --red:     #f45b5b;
+      --yellow:  #f5c842;
+      --accent:  #7b6ef6;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem 1rem 4rem;
+    }
+
+    /* ── Header ── */
+    header {
+      max-width: 1100px;
+      margin: 0 auto 2.5rem;
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+    }
+    header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -1px; }
+    header span { color: var(--muted); font-size: .9rem; font-family: 'DM Mono', monospace; }
+
+    /* ── Flash messages — aparecem no topo após uma ação ── */
+    .flashes { max-width: 1100px; margin: 0 auto 1.5rem; display: flex; flex-direction: column; gap: .5rem; }
+    .flash {
+      padding: .75rem 1.25rem;
+      border-radius: 8px;
+      font-size: .9rem;
+      font-family: 'DM Mono', monospace;
+    }
+    .flash.ok   { background: #0d2e22; border: 1px solid var(--green); color: var(--green); }
+    .flash.erro { background: #2e0d0d; border: 1px solid var(--red);   color: var(--red);   }
+
+    /* ── Cards de resumo no topo ── */
+    .resumo {
+      max-width: 1100px;
+      margin: 0 auto 2.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+    .card label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: .4rem; }
+    .card .valor { font-size: 1.65rem; font-weight: 700; font-family: 'DM Mono', monospace; }
+    .card.positivo .valor { color: var(--green); }
+    .card.negativo .valor { color: var(--red); }
+
+    /* Jinja2: muda a cor do saldo dependendo se é positivo ou negativo */
+    .card.saldo .valor { color: {% if restante >= 0 %}var(--green){% else %}var(--red){% endif %}; }
+
+    /* ── Layout de duas colunas ── */
+    .grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+    /* Em telas pequenas, empilha as colunas */
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+
+    /* ── Títulos de seção ── */
+    section h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    /* Bolinha colorida ao lado do título */
+    section h2 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-red   { background: var(--red); }
+    .dot-green { background: var(--green); }
+
+    /* ── Formulários ── */
+    form.inline {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: .75rem;
+      margin-bottom: 1.5rem;
+    }
+    input[type="text"], input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .9rem;
+      padding: .65rem 1rem;
+      width: 100%;
+      transition: border-color .2s;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+
+    /* ── Checkbox de desconto ── */
+    .desconto-toggle {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      font-size: .85rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none; /* impede selecionar o texto ao clicar */
+    }
+    .desconto-toggle input[type="checkbox"] {
+      accent-color: var(--accent); /* cor do checkbox quando marcado */
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+    }
+
+    /* Campos extras de desconto — escondidos por padrão */
+    .desconto-campos { display: none; flex-direction: column; gap: .75rem; }
+    .desconto-campos.visivel { display: flex; }
+
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: .9rem;
+      padding: .7rem 1.25rem;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+    button.primary:hover { opacity: .85; }
+
+    /* ── Tabelas ── */
+    .tabela {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      padding: .75rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: .7rem 1rem;
+      font-size: .88rem;
+      font-family: 'DM Mono', monospace;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.025); }
+
+    td.valor-col   { color: var(--red); }
+    td.liquido-col { color: var(--green); }
+
+    /* Texto quando a tabela está vazia */
+    .empty { padding: 1.5rem 1rem; color: var(--muted); font-size: .85rem; text-align: center; }
+
+    /* ── Botão de excluir ── */
+    button.del {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: .75rem;
+      padding: .25rem .6rem;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    button.del:hover { border-color: var(--red); color: var(--red); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>💰 Finanças</h1>
+    <span>controle pessoal</span>
+  </header>
+
+  <!-- Mensagens de sucesso ou erro vindas do Flask (flash) -->
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% if msgs %}
+      <div class="flashes">
+        {% for cat, msg in msgs %}
+          <div class="flash {{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- Cards de resumo geral -->
+  <div class="resumo">
+    <div class="card positivo">
+      <label>Renda líquida</label>
+      <div class="valor">R$ {{ "%.2f"|format(total_renda) }}</div>
+    </div>
+    <div class="card negativo">
+      <label>Total de gastos</label>
+      <div class="valor">R$ {{ "%.2f"|format(total_gastos) }}</div>
+    </div>
+    <div class="card saldo">
+      <label>Saldo restante</label>
+      <div class="valor">R$ {{ "%.2f"|format(restante) }}</div>
+    </div>
+  </div>
+
+  <!-- Grid: Renda à esquerda, Gastos à direita -->
+  <div class="grid">
+
+    <!-- ══ RENDA (aparece primeiro) ══ -->
+    <section>
+      <h2><span class="dot dot-green"></span>Renda</h2>
+
+      <form class="inline" action="/renda" method="POST">
+        <input type="text"   name="tipo"  placeholder="Tipo (ex: salário, freela)" required/>
+        <input type="number" name="valor" placeholder="Valor bruto (R$)" step="0.01" min="0.01" required/>
+
+        <!-- Checkbox: pergunta se tem desconto -->
+        <label class="desconto-toggle">
+          <input type="checkbox" name="tem_desconto" id="toggleDesconto" onchange="toggleDesconto()"/>
+          Possui desconto no salário?
+        </label>
+
+        <!-- Campos extras que aparecem só se marcar o checkbox acima -->
+        <div class="desconto-campos" id="camposDesconto">
+          <input type="text"   name="desconto_nome"       placeholder="Nome do desconto (ex: Vale Transporte)"/>
+          <input type="number" name="desconto_percentual" placeholder="Percentual (ex: 6 para 6%)" step="0.1" min="0" max="100"/>
+        </div>
+
+        <button class="primary" type="submit">+ Adicionar renda</button>
+      </form>
+
+      <!-- Tabela de rendas registradas -->
+      <div class="tabela">
+        {% if renda %}
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Bruto</th>
+                <th>Desconto</th>
+                <th>Líquido</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in renda %}
+              <tr>
+                <td>{{ r["data"] }}</td>
+                <td>{{ r["tipo"] }}</td>
+                <td style="color:var(--muted)">R$ {{ "%.2f"|format(r["bruto"]) }}</td>
+
+                <!-- Mostra o nome e % do desconto, ou um traço se não tiver -->
+                <td style="color:var(--muted); font-size:.8rem;">
+                  {% if r["desconto_valor"] > 0 %}
+                    {{ r["desconto_nome"] }} ({{ "%.1f"|format(r["desconto_valor"] * 100) }}%)
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                <td class="liquido-col">R$ {{ "%.2f"|format(r["liquido"]) }}</td>
+                <td>
+                  <!-- Formulário de exclusão — cada botão ✕ envia pro ID correto -->
+                  <form action="/renda/{{ r['id'] }}/excluir" method="POST" style="display:inline">
+                    <button class="del" type="submit">✕</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">Nenhuma renda registrada.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- ══ GASTOS (aparece segundo) ══ -->
+    <section>
+      <h2><span class="dot dot-red"></span>Gastos</h2>
+
+      <form class="inline" action="/gasto" method="POST">
+        <input type="text"   name="nome"  placeholder="Nome do gasto" required/>
+        <input type="number" name="valor" placeholder="Valor (R$)" step="0.01" min="0.01" required/>
+        <button class="primary" type="submit">+ Adicionar gasto</button>
+      </form>
+
+      <!-- Tabela de gastos registrados -->
+      <div class="tabela">
+        {% if gastos %}
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Nome</th>
+                <th>Valor</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for g in gastos %}
+              <tr>
+                <td>{{ g["data"] }}</td>
+                <td>{{ g["nome"] }}</td>
+                <td class="valor-col">R$ {{ "%.2f"|format(g["valor"]) }}</td>
+                <td>
+                  <form action="/gasto/{{ g['id'] }}/excluir" method="POST" style="display:inline">
+                    <button class="del" type="submit">✕</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">Nenhum gasto registrado.</p>
+        {% endif %}
+      </div>
+    </section>
+
+  </div>
+
+<script>
+  // Pega o checkbox pelo id e fica "escutando" quando ele mudar de estado
+  document.getElementById("toggleDesconto").addEventListener("change", function() {
+    
+    // Pega a div que contém os campos de desconto
+    const campos = document.getElementById("camposDesconto");
+    
+    if (this.checked) {
+      // "this" é o próprio checkbox — se estiver marcado, mostra os campos
+      campos.classList.add("visivel");
+    } else {
+      // Se desmarcar, esconde os campos...
+      campos.classList.remove("visivel");
+      // ...e limpa os valores pra não enviar dados sem querer
+      campos.querySelectorAll("input").forEach(i => i.value = "");
+    }
+  });
+</script>
+
+</body>
+</html>
